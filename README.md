@@ -56,6 +56,124 @@ from deepymod.model.library import Library1D
 from deepymod.model.sparse_estimators import Threshold, STRidge
 from deepymod.training import train
 from deepymod.training.sparsity_scheduler import Periodic, TrainTest, TrainTestPeriodic
+
+
+if torch.cuda.is_available():
+    device = "cuda"
+else:
+    device = "cpu"
+print(device)
+
+# Settings for reproducibility
+np.random.seed(42)
+torch.manual_seed(50)
+
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = False
+
+#########################
+
+
+# Making dataset
+v = 0.1
+A = 1.0
+
+x = torch.linspace(-3, 4, 100)
+t = torch.linspace(0.5, 5.0, 50)
+
+
+#x = torch.tensor(x)
+#t = torch.tensor(t)
+
+
+load_kwargs = {"x": x, "t": t, "v": v, "A": A}
+preprocess_kwargs = {"noise_level": 0.00}
+
+
+#########################
+#########################
+#########################
+
+dataset = Dataset(
+    burgers_delta,
+    load_kwargs=load_kwargs,
+    preprocess_kwargs=preprocess_kwargs,
+    subsampler=Subsample_random,
+    subsampler_kwargs={"number_of_samples": 500},
+    device=device,
+)
+
+coords = dataset.get_coords().cpu()
+data = dataset.get_data().cpu()
+fig, ax = plt.subplots()
+im = ax.scatter(coords[:,1], coords[:,0], c=data[:,0], marker="x", s=10)
+ax.set_xlabel('x')
+ax.set_ylabel('t')
+fig.colorbar(mappable=im)
+
+plt.show()
+
+
+##########################
+##########################
+
+
+train_dataloader, test_dataloader = get_train_test_loader(
+    dataset, train_test_split=0.8)
+
+
+##########################
+##########################
+
+poly_order = 2
+diff_order = 2
+
+n_combinations = (poly_order+1)*(diff_order+1) 
+n_features = 1
+
+
+network = NN(2, [64, 64, 64, 64], 1)
+
+library = Library1D(poly_order, diff_order)
+estimator = Threshold(0.1) 
+sparsity_scheduler = TrainTestPeriodic(periodicity=50, patience=200, delta=1e-5)
+constraint = LeastSquares()
+constraint_2 = Ridge()
+constraint_3 = STRidgeCons()
+
+estimator_2 = STRidge()
+
+#linear_module = CoeffsNetwork(int(n_combinations),int(n_features))
+
+
+#constraint = Ridge()
+# Configuration of the sparsity scheduler
+model = DeepMoD(network, library, estimator_2, constraint_3, estimator_2).to(device)
+
+
+# Defining optimizer
+optimizer = torch.optim.Adam(model.parameters(), betas=(0.99, 0.99), amsgrad=True, lr=1e-3) 
+
+
+
+train(
+    model,
+    train_dataloader,
+    test_dataloader,
+    optimizer,
+    sparsity_scheduler,
+    exp_ID="Test",
+    write_iterations=25,
+    max_iterations=25000,
+    delta=1e-4,
+    patience=200,
+)
+
+model.sparsity_masks
+
+print(model.estimator_coeffs())
+print(model.constraint.coeff_vectors[0].detach().cpu())
+
 ```
 
 ## DeepMOD class
@@ -230,10 +348,6 @@ class Constraint(nn.Module, metaclass=ABCMeta):
         
         #time_derivs, thetas = input
         
-        
-        
-        
-
         if self.sparsity_masks is None:
             self.sparsity_masks = [
                 torch.ones(theta.shape[1], dtype=torch.bool).to(theta.device)
@@ -246,8 +360,6 @@ class Constraint(nn.Module, metaclass=ABCMeta):
         # and multiply by mask to set zeros. For least squares-style, we need to put in
         # zeros in the right spot to get correct shape.
         
-        
-       
         
         """
         with torch.no_grad():
@@ -389,9 +501,6 @@ class Estimator(nn.Module, metaclass=ABCMeta):
         """
         pass
 ```
-
-
-
 
 Let's have a close look at `Estimator` base class. We first divide the dictionary terms and time derivatives by their 2-norms.  
 
@@ -567,8 +676,36 @@ like before we can use many approaches to solve this least square problem as fol
 ```python
 from deepymod.model.constraint import LeastSquares, Ridge, STRidgeCons
 ```
-anyway. `self.fit` is an abstract method and any custom library class has to implement `def fit()` method! this is a typical design pattern approaches.
+anyway. `self.fit` is an abstract method and any custom library class has to implement `def fit()` method! this is a typical in design pattern approaches. the results of this `coeff_vectors` has a size equal to the size of `non-False` elements of `sparsity_masks` therefore we should bring them back into the original shape! thus we make use of the following:
 
+```python
+self.coeff_vectors = [
+            self.map_coeffs(mask, coeff)
+            if mask.shape[0] != coeff.shape[0]
+            else coeff * mask[:, None]
+            for mask, coeff in zip(self.sparsity_masks, coeff_vectors)
+        ]
+@staticmethod
+    def map_coeffs(mask: torch.Tensor, coeff_vector: torch.Tensor) -> torch.Tensor:
+        """Places the coeff_vector components in the true positions of the mask.
+        I.e. maps ((0, 1, 1, 0), (0.5, 1.5)) -> (0, 0.5, 1.5, 0).
+
+        Args:
+            mask (torch.Tensor): Boolean mask describing active components.
+            coeff_vector (torch.Tensor): Vector with active-components.
+
+        Returns:
+            mapped_coeffs (torch.Tensor): mapped coefficients.
+        """
+        mapped_coeffs = (
+            torch.zeros((mask.shape[0], 1))
+            .to(coeff_vector.device)
+            .masked_scatter_(mask[:, None], coeff_vector)
+        )
+        return mapped_coeffs
+```
+
+the last step is to 
 
 
 
