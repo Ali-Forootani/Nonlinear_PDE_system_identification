@@ -26,3 +26,37 @@ I recommend you to avoid such decision! because it throws bugs as you want to ut
 For doing this:
 
 (i) Go to `src` folder and make `.py` file! or even `.ipynb` with any IDE (spyder or VSCode) or Jupyter notebook
+
+
+then inside the empty `.py` file try to add the system path and import general libraries, such as:
+
+```python
+# General imports
+import numpy as np
+import torch
+import sys
+import os
+import scipy.io as sio
+import matplotlib.pyplot as plt
+import numpy as np
+import torch
+cwd = os.getcwd()
+sys.path.append(cwd)
+```
+Then you can import modules that are required for our simulations:
+
+```python
+# DeePyMoD imports
+from deepymod import DeepMoD
+from deepymod.data import Dataset, get_train_test_loader
+from deepymod.data.samples import Subsample_random
+from deepymod.data.burgers import burgers_delta
+from deepymod.model.constraint import LeastSquares, Ridge, STRidgeCons
+from deepymod.model.func_approx import NN
+from deepymod.model.library import Library1D
+from deepymod.model.sparse_estimators import Threshold, STRidge
+from deepymod.training import train
+from deepymod.training.sparsity_scheduler import Periodic, TrainTest, TrainTestPeriodic
+```
+
+as you can see `deepymod` is the parent directory and the rest are subdirectories or modules. 
